@@ -2262,7 +2262,7 @@ fn service_catalog(cfg: &AppConfig, state: &ProcessState) -> Vec<ServiceInfo> {
                 .and_then(|map| map.get(&spec.id))
                 .map(|child| child.id());
             let externally_running =
-                spec.id == "apache" && spec.port.map(|p| !is_port_available(p)).unwrap_or(false);
+                spec.id == "apache" && spec.executable.exists() && spec.port.map(|p| !is_port_available(p)).unwrap_or(false);
             let status = if pid.is_some() || externally_running {
                 "running"
             } else {
