@@ -4009,12 +4009,20 @@ fn is_ephemeral_resource_dir(root: &Path, resource_dir: &Path) -> bool {
 
 fn seed_package_catalog(app: &tauri::AppHandle, root: &Path) -> Result<(), String> {
     let target = package_catalog_path(root);
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    
     let legacy_local = root.join("config").join("packages.conf");
     if legacy_local.exists() {
         let _ = fs::remove_file(&legacy_local); // Limpa o cache antigo
+    }
+
+    // Se o arquivo de catálogo já existe, consideramos que já foi semeado ou customizado pelo usuário.
+    // Para forçar uma atualização em ambiente de desenvolvimento, apagamos manualmente se necessário.
+    if target.exists() {
+        return Ok(());
+    }
+
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let source = bundled_or_workspace_file(app, PACKAGE_CATALOG_PATH);
     let source = if source.exists() {
