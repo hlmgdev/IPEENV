@@ -35,6 +35,7 @@ type ServiceInfo = {
   available: boolean;
   port_available: boolean | null;
   last_message: string;
+  enabled: boolean;
 };
 
 type ProjectInfo = {
@@ -248,6 +249,10 @@ function App() {
     runAction(`${command}:${service}`, () => invoke<ActionResult>(command, { service }));
   };
 
+  const enableAction = (service: string, command: "enable_service" | "disable_service") => {
+    runAction(`${command}:${service}`, () => invoke<ActionResult>(command, { service }));
+  };
+
   return (
     <div className="app">
       <header className="titlebar">
@@ -329,6 +334,8 @@ function App() {
               openLogs={() => setSection("logs")}
               serviceAction={serviceAction}
               busy={busy}
+              onOpenUrl={(url) => invoke<ActionResult>("open_url", { url }).then((r) => setNotice(actionMessage(r)))}
+              onOpenPath={(path) => invoke<ActionResult>("open_path", { path }).then((r) => setNotice(actionMessage(r)))}
             />
           )}
           {section === "projects" && (
@@ -352,6 +359,7 @@ function App() {
               env={env}
               services={env?.services ?? []}
               serviceAction={serviceAction}
+              enableAction={enableAction}
               busy={busy}
               onAllowFirewall={() => runAction("firewall", () => invoke<ActionResult>("allow_firewall"))}
               onUpdatePorts={(httpPort, httpsPort, mysqlPort) =>
@@ -365,6 +373,7 @@ function App() {
                   }),
                 )
               }
+              onUpdateHttps={(enabled) => runAction("https", () => invoke<ActionResult>("update_https", { request: { enabled } }))}
             />
           )}
           {section === "tools" && (
@@ -397,22 +406,10 @@ function App() {
               env={env}
               phpRuntimes={phpRuntimes}
               onOpenHosts={() => runAction("hosts", () => invoke<ActionResult>("open_hosts_file"))}
-              onUpdateHttps={(enabled) => runAction("https", () => invoke<ActionResult>("update_https", { request: { enabled } }))}
               onOpenPhpIni={(version) => runAction(`php-ini:${version}`, () => invoke<ActionResult>("open_php_ini", { version }))}
               onTogglePhpExtension={(version, extension, enabled) =>
                 runAction(`php-ext:${version}:${extension}`, () =>
                   invoke<ActionResult>("set_php_extension", { version, extension, enabled }),
-                )
-              }
-              onUpdatePorts={(httpPort, httpsPort, mysqlPort) =>
-                runAction("ports", () =>
-                  invoke<ActionResult>("update_ports", {
-                    ports: {
-                      http_port: httpPort,
-                      https_port: httpsPort,
-                      mysql_port: mysqlPort,
-                    },
-                  }),
                 )
               }
             />
@@ -430,6 +427,7 @@ function App() {
           t={t}
           templates={siteTemplates}
           phpOptions={phpOptions}
+          httpsEnabled={env?.https_enabled ?? true}
           progress={projectProgress}
           onClose={() => setModalOpen(false)}
           onOpenConfig={() => runAction("sites", () => invoke<ActionResult>("open_sites_config"))}
@@ -465,11 +463,14 @@ function Overview(props: {
   openLogs: () => void;
   serviceAction: (service: string, command: "start_service" | "stop_service" | "restart_service") => void;
   busy: string | null;
+  onOpenUrl: (url: string) => void;
+  onOpenPath: (path: string) => void;
 }) {
   const { t } = props;
   const services = props.env?.services ?? [];
-  const running = services.filter((service) => service.status === "running").length;
-  const blocked = services.filter((service) => service.port_available === false && service.status !== "running").length;
+  const enabledServices = services.filter((service) => service.enabled);
+  const running = enabledServices.filter((service) => service.status === "running").length;
+  const blocked = enabledServices.filter((service) => service.port_available === false && service.status !== "running").length;
 
   return (
     <section className="view">
@@ -502,7 +503,7 @@ function Overview(props: {
       <div className="grid two">
         <Panel title={t("Serviços principais")}>
           <div className="mini-list">
-            {services.map((service) => (
+            {enabledServices.map((service) => (
               <div className="mini-row" key={service.id}>
                 <span className={`dot ${service.status === "running" ? "ok" : service.available ? "off" : "warn"}`} />
                 <strong>{service.name}</strong>
@@ -523,13 +524,17 @@ function Overview(props: {
             ))}
           </div>
         </Panel>
-        <Panel title={t("Projetos recentes")}>
-          <div className="mini-list">
-            {props.projects.slice(0, 6).map((project) => (
+        <Panel title={t("Projetos")}>
+          <div className="mini-list" style={{ maxHeight: '240px', overflowY: 'auto' }}>
+            {props.projects.map((project) => (
               <div className="mini-row" key={project.name}>
                 <span className={`dot ${project.ssl_enabled ? "ok" : "off"}`} />
                 <strong>{project.name}</strong>
                 <small>{project.domain}</small>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button className="icon-button" onClick={() => props.onOpenUrl(`http${project.ssl_enabled ? 's' : ''}://${project.domain}`)} title={t("Abrir no navegador")}><Globe size={13} /></button>
+                  <button className="icon-button" onClick={() => props.onOpenPath(project.path)} title={t("Abrir pasta")}><Folder size={13} /></button>
+                </div>
               </div>
             ))}
             {!props.projects.length && <EmptyLine text={t("Nenhum projeto ainda. Crie o primeiro em www.")} />}
@@ -624,20 +629,24 @@ function ServicesView(props: {
   env: EnvironmentInfo | null;
   services: ServiceInfo[];
   serviceAction: (service: string, command: "start_service" | "stop_service" | "restart_service") => void;
+  enableAction: (service: string, command: "enable_service" | "disable_service") => void;
   busy: string | null;
   onAllowFirewall: () => void;
   onUpdatePorts: (httpPort: number, httpsPort: number, mysqlPort: number) => void;
+  onUpdateHttps: (enabled: boolean) => void;
 }) {
   const { t } = props;
   const [httpPort, setHttpPort] = useState(props.env?.http_port ?? 80);
   const [httpsPort, setHttpsPort] = useState(props.env?.https_port ?? 443);
   const [mysqlPort, setMysqlPort] = useState(props.env?.mysql_port ?? 3306);
+  const [httpsEnabled, setHttpsEnabled] = useState(props.env?.https_enabled ?? true);
 
   useEffect(() => {
     if (!props.env) return;
     setHttpPort(props.env.http_port);
     setHttpsPort(props.env.https_port);
     setMysqlPort(props.env.mysql_port);
+    setHttpsEnabled(props.env.https_enabled);
   }, [props.env]);
 
   return (
@@ -646,25 +655,6 @@ function ServicesView(props: {
         <div><h1>{t("Serviços")}</h1><p>{t("Processos locais controlados pelo Ipeenv.")}</p></div>
         <button className="btn" onClick={props.onAllowFirewall}><Shield size={14} /> {t("Liberar firewall")}</button>
       </div>
-      <Panel title={t("Portas")}>
-        <div className="port-grid">
-          <label>
-            Apache HTTP
-            <input type="number" min="1" max="65535" value={httpPort} onChange={(event) => setHttpPort(Number(event.target.value))} />
-          </label>
-          <label>
-            Apache HTTPS
-            <input type="number" min="1" max="65535" value={httpsPort} onChange={(event) => setHttpsPort(Number(event.target.value))} />
-          </label>
-          <label>
-            MySQL
-            <input type="number" min="1" max="65535" value={mysqlPort} onChange={(event) => setMysqlPort(Number(event.target.value))} />
-          </label>
-          <button className="primary" onClick={() => props.onUpdatePorts(httpPort, httpsPort, mysqlPort)}>
-            {t("Salvar portas")}
-          </button>
-        </div>
-      </Panel>
       <div className="service-grid">
         {props.services.map((service) => (
           <article className={`service-card ${service.status}`} key={service.id}>
@@ -677,7 +667,36 @@ function ServicesView(props: {
               <span className={`dot ${service.status === "running" ? "ok" : service.available ? "off" : "warn"}`} />
             </header>
             <dl>
-              <div><dt>Porta</dt><dd>{service.port ?? "-"}</dd></div>
+              {service.id === "apache" && (
+                <>
+                  <div>
+                    <dt>Porta HTTP</dt>
+                    <dd><input type="number" min="1" max="65535" value={httpPort} onChange={(e) => setHttpPort(Number(e.target.value))} onBlur={() => props.onUpdatePorts(httpPort, httpsPort, mysqlPort)} style={{width: '100%', boxSizing: 'border-box'}} /></dd>
+                  </div>
+                  <div>
+                    <dt>Porta HTTPS</dt>
+                    <dd><input type="number" min="1" max="65535" disabled={!httpsEnabled} value={httpsPort} onChange={(e) => setHttpsPort(Number(e.target.value))} onBlur={() => props.onUpdatePorts(httpPort, httpsPort, mysqlPort)} style={{width: '100%', boxSizing: 'border-box'}} /></dd>
+                  </div>
+                  <div>
+                    <dt>HTTPS</dt>
+                    <dd>
+                      <label className="switch">
+                        <input type="checkbox" checked={httpsEnabled} onChange={(e) => {
+                          setHttpsEnabled(e.target.checked);
+                          props.onUpdateHttps(e.target.checked);
+                        }} />
+                        <span />
+                      </label>
+                    </dd>
+                  </div>
+                </>
+              )}
+              {service.id === "mysql" && (
+                <div>
+                  <dt>Porta MySQL</dt>
+                  <dd><input type="number" min="1" max="65535" value={mysqlPort} onChange={(e) => setMysqlPort(Number(e.target.value))} onBlur={() => props.onUpdatePorts(httpPort, httpsPort, mysqlPort)} style={{width: '100%', boxSizing: 'border-box'}} /></dd>
+                </div>
+              )}
               <div><dt>PID</dt><dd>{service.pid ?? "-"}</dd></div>
               <div><dt>{t("Binário")}</dt><dd title={service.executable}>{service.available ? t("encontrado") : t("ausente")}</dd></div>
               <div><dt>{t("Status")}</dt><dd>{serviceStatusText(service.status, t)}</dd></div>
@@ -688,13 +707,13 @@ function ServicesView(props: {
                 <input
                   type="checkbox"
                   disabled={!!props.busy}
-                  checked={service.status === "running"}
-                  onChange={() => props.serviceAction(service.id, service.status === "running" ? "stop_service" : "start_service")}
+                  checked={service.enabled}
+                  onChange={() => props.enableAction(service.id, service.enabled ? "disable_service" : "enable_service")}
                 />
                 <span />
-                <em>{service.status === "running" ? t("Ligado") : t("Desligado")}</em>
+                <em>{service.enabled ? t("Habilitado") : t("Desabilitado")}</em>
               </label>
-              <button onClick={() => props.serviceAction(service.id, "restart_service")} disabled={!!props.busy}><RefreshCw size={13} /> {t("Reiniciar")}</button>
+              <button onClick={() => props.serviceAction(service.id, "restart_service")} disabled={!!props.busy || service.status !== "running"}><RefreshCw size={13} /> {t("Reiniciar")}</button>
             </footer>
           </article>
         ))}
@@ -825,35 +844,19 @@ function SettingsView({
   env,
   phpRuntimes,
   onOpenHosts,
-  onUpdateHttps,
   onOpenPhpIni,
   onTogglePhpExtension,
-  onUpdatePorts,
 }: {
   t: Translate;
   env: EnvironmentInfo | null;
   phpRuntimes: PhpRuntimeInfo[];
   onOpenHosts: () => void;
-  onUpdateHttps: (enabled: boolean) => void;
   onOpenPhpIni: (version: string) => void;
   onTogglePhpExtension: (version: string, extension: string, enabled: boolean) => Promise<void>;
-  onUpdatePorts: (httpPort: number, httpsPort: number, mysqlPort: number) => void;
 }) {
-  const [httpPort, setHttpPort] = useState(env?.http_port ?? 80);
-  const [httpsPort, setHttpsPort] = useState(env?.https_port ?? 443);
-  const [mysqlPort, setMysqlPort] = useState(env?.mysql_port ?? 3306);
-  const [httpsEnabled, setHttpsEnabled] = useState(env?.https_enabled ?? true);
   const [selectedPhp, setSelectedPhp] = useState(phpRuntimes[0]?.version ?? "");
   const [extensions, setExtensions] = useState<PhpExtensionInfo[]>([]);
   const [loadingExtensions, setLoadingExtensions] = useState(false);
-
-  useEffect(() => {
-    if (!env) return;
-    setHttpPort(env.http_port);
-    setHttpsPort(env.https_port);
-    setMysqlPort(env.mysql_port);
-    setHttpsEnabled(env.https_enabled);
-  }, [env]);
 
   useEffect(() => {
     if (!phpRuntimes.length) {
@@ -890,43 +893,6 @@ function SettingsView({
         <div><h1>{t("Preferências")}</h1><p>{t("Configurações e caminhos do ambiente.")}</p></div>
         <button className="btn" onClick={onOpenHosts}><FileText size={14} /> {t("Abrir hosts")}</button>
       </div>
-      <Panel title={t("Portas dos serviços")}>
-        <div className="port-grid">
-          <label>
-            HTTP
-            <input type="number" min="1" max="65535" value={httpPort} onChange={(event) => setHttpPort(Number(event.target.value))} />
-          </label>
-          <label>
-            HTTPS
-            <input type="number" min="1" max="65535" value={httpsPort} onChange={(event) => setHttpsPort(Number(event.target.value))} />
-          </label>
-          <label>
-            MySQL
-            <input type="number" min="1" max="65535" value={mysqlPort} onChange={(event) => setMysqlPort(Number(event.target.value))} />
-          </label>
-          <button className="primary" onClick={() => onUpdatePorts(httpPort, httpsPort, mysqlPort)}>
-            {t("Salvar portas")}
-          </button>
-        </div>
-      </Panel>
-      <Panel title={t("HTTPS local")}>
-        <div className="toggle-row">
-          <label>
-            <input
-              type="checkbox"
-              checked={httpsEnabled}
-              onChange={(event) => {
-                setHttpsEnabled(event.target.checked);
-                onUpdateHttps(event.target.checked);
-              }}
-            />
-            {t("Habilitar HTTPS para projetos .test")}
-          </label>
-          <span>
-            {t("Quando habilitado, o Ipeenv gera uma CA local, solicita confiança no Windows e assina certificados por domínio.")}
-          </span>
-        </div>
-      </Panel>
       <Panel title={t("PHP por versão")}>
         <div className="php-manager">
           <aside className="php-runtime-list">
@@ -997,6 +963,7 @@ function CreateProjectModal(props: {
   t: Translate;
   templates: SiteTemplate[];
   phpOptions: PhpOption[];
+  httpsEnabled: boolean;
   progress: ProjectProgress | null;
   onClose: () => void;
   onOpenConfig: () => void;
@@ -1014,8 +981,6 @@ function CreateProjectModal(props: {
     && (!selectedTemplate?.php_max || versionAtMost(php.version, selectedTemplate.php_max))
   );
   const [phpVersion, setPhpVersion] = useState(props.phpOptions[0]?.version ?? "");
-  const [addHost, setAddHost] = useState(true);
-  const [enableSsl, setEnableSsl] = useState(true);
 
   useEffect(() => {
     const nextVersions = props.templates.filter((item) => item.framework === framework);
@@ -1042,7 +1007,7 @@ function CreateProjectModal(props: {
         onMouseDown={(event) => event.stopPropagation()}
         onSubmit={(event) => {
           event.preventDefault();
-          props.onCreate(name, template, phpVersion, addHost, enableSsl);
+          props.onCreate(name, template, phpVersion, true, props.httpsEnabled);
         }}
       >
         <header>
@@ -1091,10 +1056,6 @@ function CreateProjectModal(props: {
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="meu-site" />
           <small>{t("Domínio previsto: {{name}}.test", { name: name || "projeto" })}</small>
         </label>
-        <div className="checks">
-          <label><input type="checkbox" checked={enableSsl} onChange={(event) => setEnableSsl(event.target.checked)} /> {t("Preparar SSL local")}</label>
-          <label><input type="checkbox" checked={addHost} onChange={(event) => setAddHost(event.target.checked)} /> {t("Adicionar ao hosts")}</label>
-        </div>
         {props.progress && (
           <div className={`project-progress ${props.progress.status}`}>
             <div>

@@ -39,6 +39,8 @@ struct AppConfig {
     php_version_hint: String,
     #[serde(default = "default_https_enabled")]
     https_enabled: bool,
+    #[serde(default = "default_enabled_services")]
+    enabled_services: Vec<String>,
 }
 
 impl AppConfig {
@@ -50,12 +52,17 @@ impl AppConfig {
             mysql_port: 3306,
             php_version_hint: "PHP empacotado".to_string(),
             https_enabled: true,
+            enabled_services: default_enabled_services(),
         }
     }
 }
 
 fn default_https_enabled() -> bool {
     true
+}
+
+fn default_enabled_services() -> Vec<String> {
+    vec!["apache".to_string(), "mysql".to_string()]
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +97,7 @@ struct ServiceInfo {
     available: bool,
     port_available: Option<bool>,
     last_message: String,
+    enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +288,8 @@ pub fn run() {
             get_environment_info,
             list_projects,
             create_project,
+            enable_service,
+            disable_service,
             start_service,
             stop_service,
             restart_service,
@@ -614,6 +624,30 @@ fn create_project(
     emit_project_progress(&app, &name, "Projeto criado", 100, "done");
 
     Ok(ActionResult::message(true, notes.join("; ")))
+}
+
+#[tauri::command]
+fn enable_service(app: tauri::AppHandle, service: String) -> Result<ActionResult, String> {
+    let root = app_root(&app)?;
+    ensure_environment(&root)?;
+    let mut cfg = read_config(&root)?;
+    if !cfg.enabled_services.contains(&service) {
+        cfg.enabled_services.push(service.clone());
+        write_config(&root, &cfg)?;
+    }
+    Ok(ActionResult::message(true, format!("{} habilitado", service)))
+}
+
+#[tauri::command]
+fn disable_service(app: tauri::AppHandle, service: String) -> Result<ActionResult, String> {
+    let root = app_root(&app)?;
+    ensure_environment(&root)?;
+    let mut cfg = read_config(&root)?;
+    if let Some(pos) = cfg.enabled_services.iter().position(|x| *x == service) {
+        cfg.enabled_services.remove(pos);
+        write_config(&root, &cfg)?;
+    }
+    Ok(ActionResult::message(true, format!("{} desabilitado", service)))
 }
 
 #[tauri::command]
@@ -2163,6 +2197,7 @@ fn service_catalog(cfg: &AppConfig, state: &ProcessState) -> Vec<ServiceInfo> {
                 "stopped"
             }
             .to_string();
+            let is_enabled = cfg.enabled_services.contains(&spec.id);
             ServiceInfo {
                 id: spec.id,
                 name: spec.name,
@@ -2178,6 +2213,7 @@ fn service_catalog(cfg: &AppConfig, state: &ProcessState) -> Vec<ServiceInfo> {
                 } else {
                     "Binário ainda não empacotado".to_string()
                 },
+                enabled: is_enabled,
             }
         })
         .collect()
