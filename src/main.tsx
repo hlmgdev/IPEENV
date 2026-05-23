@@ -1079,9 +1079,24 @@ function CreateProjectModal(props: {
 
   useEffect(() => {
     if (!props.phpOptions.some((php) => php.version === phpVersion)) {
-      setPhpVersion(props.phpOptions[0]?.version ?? "");
+        setPhpVersion(props.phpOptions[0]?.version ?? "");
     }
   }, [props.phpOptions, phpVersion]);
+
+  const [logs, setLogs] = useState<string[]>([]);
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const unlisten = listen<{ project: string; line: string }>("project-log", (event) => {
+      if (event.payload.project === name) {
+        setLogs((prev) => [...prev, event.payload.line]);
+        setTimeout(() => logsEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
+      }
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, [name]);
 
   const selectedPhpMeta = props.phpOptions.find((php) => php.version === phpVersion);
   const selectedPhpCompatible =
@@ -1153,11 +1168,23 @@ function CreateProjectModal(props: {
             <div className="progress-track">
               <span style={{ width: `${props.progress.percent}%` }} />
             </div>
+            <details className="project-log-accordion">
+              <summary>{t("Ver log de instalação")}</summary>
+              <pre>
+                {logs.join("\n")}
+                <div ref={logsEndRef} />
+              </pre>
+            </details>
           </div>
         )}
         <footer>
-          <button type="button" onClick={props.onClose}>{t("Cancelar")}</button>
-          <button className="primary" type="submit"><Plus size={14} /> {t("Criar")}</button>
+          <button type="button" onClick={async () => {
+            if (props.progress?.status === "running") {
+              await invoke("cancel_project_creation", { name });
+            }
+            props.onClose();
+          }}>{t("Cancelar")}</button>
+          <button className="primary" type="submit" disabled={props.progress?.status === "running"}><Plus size={14} /> {t("Criar")}</button>
         </footer>
       </form>
     </div>

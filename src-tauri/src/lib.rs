@@ -30,6 +30,7 @@ const LEGACY_SITE_TEMPLATE_CATALOG_PATH: &str = "dependencias/sites.conf";
 #[derive(Default)]
 struct ProcessState {
     children: Mutex<HashMap<String, Child>>,
+    creation_pids: Mutex<HashMap<String, u32>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -343,12 +344,16 @@ pub fn run() {
             }
             _ => {}
         })
-        .manage(ProcessState::default())
+        .manage(ProcessState {
+            creation_pids: std::sync::Mutex::new(HashMap::new()),
+            ..Default::default()
+        })
         .invoke_handler(tauri::generate_handler![
             quit,
             get_environment_info,
             list_projects,
             create_project,
+            cancel_project_creation,
             enable_service,
             disable_service,
             start_service,
@@ -542,9 +547,33 @@ fn list_projects_from_root(root: &Path) -> Result<Vec<ProjectInfo>, String> {
 }
 
 #[tauri::command]
-fn create_project(
+fn cancel_project_creation(
     app: tauri::AppHandle,
-    state: State<ProcessState>,
+    state: State<'_, ProcessState>,
+    name: String,
+) -> Result<(), String> {
+    if let Ok(mut pids) = state.creation_pids.lock() {
+        if let Some(pid) = pids.remove(&name) {
+            #[cfg(target_os = "windows")]
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(0x08000000)
+                .output();
+        }
+    }
+    let root = app_root(&app)?;
+    let project_dir = root.join("www").join(&name);
+    if project_dir.exists() {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn create_project(
+    app: tauri::AppHandle,
+    state: State<'_, ProcessState>,
     request: CreateProjectRequest,
 ) -> Result<ActionResult, String> {
     let root = app_root(&app)?;
@@ -3240,6 +3269,21 @@ fn create_project_from_template(
     }
 }
 
+fn emit_project_log(app: &tauri::AppHandle, project: &str, line: &str) {
+    #[derive(serde::Serialize, Clone)]
+    struct ProjectLogPayload {
+        project: String,
+        line: String,
+    }
+    let _ = app.emit(
+        "project-log",
+        ProjectLogPayload {
+            project: project.to_string(),
+            line: line.to_string(),
+        },
+    );
+}
+
 fn emit_project_progress(
     app: &tauri::AppHandle,
     project: &str,
@@ -3316,38 +3360,69 @@ fn run_site_command(
         process
             .args(["/C", &prepared])
             .env("PATH", composer_path(root, php_version)?);
-        #[cfg(target_os = "windows")]
-        process.creation_flags(CREATE_NO_WINDOW);
         process
     };
+    #[cfg(target_os = "windows")]
+    command_process.creation_flags(0x08000000);
     command_process
         .current_dir(parent)
-        .env("COMPOSER_HOME", root.join("usr").join("composer"));
+        .env("COMPOSER_HOME", root.join("usr").join("composer"))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     apply_php_runtime_env(root, php_version, &mut command_process)?;
 
     emit_project_progress(app, name, "Executando Composer", 58, "running");
-    let mut output = command_process.output().map_err(|e| e.to_string())?;
-    if !output.stdout.is_empty() {
-        append_app_log(
-            root,
-            &format!(
-                "Composer stdout: {}",
-                String::from_utf8_lossy(&output.stdout)
-            ),
-        )?;
-    }
-    if !output.stderr.is_empty() {
-        append_app_log(
-            root,
-            &format!(
-                "Composer stderr: {}",
-                String::from_utf8_lossy(&output.stderr)
-            ),
-        )?;
+    let mut child = command_process.spawn().map_err(|e| e.to_string())?;
+    
+    let pid = child.id();
+    if let Some(state) = app.try_state::<ProcessState>() {
+        if let Ok(mut pids) = state.creation_pids.lock() {
+            pids.insert(name.to_string(), pid);
+        }
     }
 
-    if !output.status.success()
-        && is_composer_security_block_error(&output.stderr)
+    let stdout = child.stdout.take().expect("Failed to open stdout");
+    let stderr = child.stderr.take().expect("Failed to open stderr");
+
+    let app_clone1 = app.clone();
+    let name_clone1 = name.to_string();
+    let root_clone1 = root.to_path_buf();
+    let stdout_thread = std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().filter_map(Result::ok) {
+            emit_project_log(&app_clone1, &name_clone1, &line);
+            let _ = append_app_log(&root_clone1, &format!("Composer stdout: {}", line));
+        }
+    });
+
+    let app_clone2 = app.clone();
+    let name_clone2 = name.to_string();
+    let root_clone2 = root.to_path_buf();
+    let stderr_thread = std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(stderr);
+        let mut captured = Vec::new();
+        for line in reader.lines().filter_map(Result::ok) {
+            emit_project_log(&app_clone2, &name_clone2, &line);
+            let _ = append_app_log(&root_clone2, &format!("Composer stderr: {}", line));
+            captured.push(line);
+        }
+        captured.join("\n")
+    });
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if let Some(state) = app.try_state::<ProcessState>() {
+        if let Ok(mut pids) = state.creation_pids.lock() {
+            pids.remove(name);
+        }
+    }
+    
+    let _ = stdout_thread.join();
+    let stderr_string = stderr_thread.join().unwrap_or_default();
+
+    if !status.success()
+        && is_composer_security_block_error(stderr_string.as_bytes())
         && prepared
             .trim_start()
             .to_ascii_lowercase()
@@ -3363,41 +3438,61 @@ fn run_site_command(
         );
         let retry_command = format!("{} --no-security-blocking --no-audit", prepared.trim());
         let mut retry = composer_command(app, root, name, php_version, &retry_command)?;
+        #[cfg(target_os = "windows")]
+        retry.creation_flags(0x08000000);
         retry
             .current_dir(parent)
             .env("COMPOSER_HOME", root.join("usr").join("composer"));
         apply_php_runtime_env(root, php_version, &mut retry)?;
-        output = retry.output().map_err(|e| e.to_string())?;
+        let output = retry.output().map_err(|e| e.to_string())?;
         if !output.stdout.is_empty() {
+            let stdout_str = String::from_utf8_lossy(&output.stdout);
+            for line in stdout_str.lines() { emit_project_log(app, name, line); }
             append_app_log(
                 root,
                 &format!(
                     "Composer stdout (retry): {}",
-                    String::from_utf8_lossy(&output.stdout)
+                    stdout_str
                 ),
             )?;
         }
         if !output.stderr.is_empty() {
+            let stderr_str = String::from_utf8_lossy(&output.stderr);
+            for line in stderr_str.lines() { emit_project_log(app, name, line); }
             append_app_log(
                 root,
                 &format!(
                     "Composer stderr (retry): {}",
-                    String::from_utf8_lossy(&output.stderr)
+                    stderr_str
                 ),
             )?;
         }
-    }
-
-    if output.status.success() && project_dir.exists() {
+        
+        if output.status.success() && project_dir.exists() {
+            emit_project_progress(app, name, "Projeto baixado pelo Composer", 68, "running");
+            Ok(())
+        } else {
+            let detail = String::from_utf8_lossy(&output.stderr)
+                .lines()
+                .rev()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("sem detalhes no stderr")
+                .to_string();
+            Err(format!(
+                "Comando do catálogo de modelos falhou após retry: {} ({})",
+                retry_command, detail
+            ))
+        }
+    } else if status.success() && project_dir.exists() {
         emit_project_progress(app, name, "Projeto baixado pelo Composer", 68, "running");
         Ok(())
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr
+        let detail = stderr_string
             .lines()
             .rev()
             .find(|line| !line.trim().is_empty())
-            .unwrap_or("sem detalhes no stderr");
+            .unwrap_or("sem detalhes no stderr")
+            .to_string();
         Err(format!(
             "Comando do catálogo de modelos falhou: {} ({})",
             prepared, detail

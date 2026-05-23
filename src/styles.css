@@ -626,6 +626,33 @@ input[type="number"] {
 .project-progress.done .progress-track span { background: var(--green); }
 .project-progress.error .progress-track span { background: var(--red); }
 
+.project-log-accordion {
+  margin-top: 4px;
+}
+.project-log-accordion summary {
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 4px;
+}
+.project-log-accordion summary:hover {
+  color: var(--text);
+}
+.project-log-accordion pre {
+  background: var(--bg-1);
+  padding: 8px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text);
+  max-height: 150px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  border: 1px solid var(--line);
+}
+
 .create-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
