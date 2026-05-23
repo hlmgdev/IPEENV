@@ -14,7 +14,9 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tauri::{Emitter, Manager, State};
+use tauri::{Emitter, Manager, State, WindowEvent};
+use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState};
+use tauri::menu::{Menu, MenuItem};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -281,10 +283,69 @@ pub fn run() {
             install_bundled_portable_tools(app.handle(), &root)?;
             cleanup_bundled_resource_dir(app.handle(), &root)?;
             append_app_log(&root, "Ipeenv initialized")?;
+
+            let quit_i = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
+            let start_all = MenuItem::with_id(app, "start_all", "Iniciar todos os serviços", true, None::<&str>)?;
+            let stop_all = MenuItem::with_id(app, "stop_all", "Parar todos os serviços", true, None::<&str>)?;
+            let start_apache = MenuItem::with_id(app, "start_apache", "Iniciar Apache", true, None::<&str>)?;
+            let stop_apache = MenuItem::with_id(app, "stop_apache", "Parar Apache", true, None::<&str>)?;
+            let start_mysql = MenuItem::with_id(app, "start_mysql", "Iniciar MySQL", true, None::<&str>)?;
+            let stop_mysql = MenuItem::with_id(app, "stop_mysql", "Parar MySQL", true, None::<&str>)?;
+            
+            let menu = Menu::with_items(app, &[
+                &start_all, &stop_all, 
+                &tauri::menu::PredefinedMenuItem::separator(app)?,
+                &start_apache, &stop_apache,
+                &tauri::menu::PredefinedMenuItem::separator(app)?,
+                &start_mysql, &stop_mysql,
+                &tauri::menu::PredefinedMenuItem::separator(app)?,
+                &quit_i
+            ])?;
+            
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .on_menu_event(|app, event| {
+                    match event.id.as_ref() {
+                        "quit" => {
+                            #[cfg(target_os = "windows")]
+                            {
+                                let _ = Command::new("taskkill").args(["/F", "/IM", "httpd.exe"]).creation_flags(CREATE_NO_WINDOW).output();
+                                let _ = Command::new("taskkill").args(["/F", "/IM", "mysqld.exe"]).creation_flags(CREATE_NO_WINDOW).output();
+                                let _ = Command::new("taskkill").args(["/F", "/IM", "php-cgi.exe"]).creation_flags(CREATE_NO_WINDOW).output();
+                            }
+                            app.exit(0);
+                        }
+                        action => {
+                            let _ = app.emit("tray-action", action);
+                        }
+                    }
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = event {
+                        if button == MouseButton::Left && button_state == MouseButtonState::Up {
+                            let app = tray.app_handle();
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            WindowEvent::CloseRequested { api, .. } => {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+            _ => {}
         })
         .manage(ProcessState::default())
         .invoke_handler(tauri::generate_handler![
+            quit,
             get_environment_info,
             list_projects,
             create_project,
@@ -352,6 +413,17 @@ fn warn_missing_legacy_php_runtime_dependency(root: &Path) -> Result<(), String>
         )?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn quit(app: tauri::AppHandle) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = Command::new("taskkill").args(["/F", "/IM", "httpd.exe"]).creation_flags(CREATE_NO_WINDOW).output();
+        let _ = Command::new("taskkill").args(["/F", "/IM", "mysqld.exe"]).creation_flags(CREATE_NO_WINDOW).output();
+        let _ = Command::new("taskkill").args(["/F", "/IM", "php-cgi.exe"]).creation_flags(CREATE_NO_WINDOW).output();
+    }
+    app.exit(0);
 }
 
 #[tauri::command]

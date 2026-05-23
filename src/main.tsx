@@ -12,6 +12,7 @@ import {
   Globe,
   HardDrive,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Server,
@@ -249,6 +250,24 @@ function App() {
     runAction(`${command}:${service}`, () => invoke<ActionResult>(command, { service }));
   };
 
+  useEffect(() => {
+    const unlisten = listen<string>("tray-action", (event) => {
+      const action = event.payload;
+      if (action === "start_all") {
+        env?.services.filter(s => s.enabled && s.status !== "running").forEach(s => serviceAction(s.id, "start_service"));
+      } else if (action === "stop_all") {
+        env?.services.filter(s => s.enabled && s.status === "running").forEach(s => serviceAction(s.id, "stop_service"));
+      } else if (action.startsWith("start_")) {
+        serviceAction(action.replace("start_", ""), "start_service");
+      } else if (action.startsWith("stop_")) {
+        serviceAction(action.replace("stop_", ""), "stop_service");
+      }
+    });
+    return () => {
+      unlisten.then((dispose) => dispose());
+    };
+  }, [env]);
+
   const enableAction = (service: string, command: "enable_service" | "disable_service") => {
     runAction(`${command}:${service}`, () => invoke<ActionResult>(command, { service }));
   };
@@ -286,10 +305,7 @@ function App() {
         <button onClick={() => runAction("config", () => invoke<ActionResult>("generate_apache_config"))}>
           <RefreshCw size={14} /> {t("Gerar configurações")}
         </button>
-        <span className="toolbar-sep" />
-        <button className="primary" onClick={() => setModalOpen(true)}>
-          <Plus size={15} /> {t("Novo projeto")}
-        </button>
+
         <select
           className="language-select"
           aria-label={t("Idioma")}
@@ -314,6 +330,7 @@ function App() {
           <NavItem active={section === "tools"} icon={<Wrench size={15} />} label={t("Ferramentas")} badge={packages.length} onClick={() => setSection("tools")} />
           <NavItem active={section === "logs"} icon={<Terminal size={15} />} label={t("Logs")} onClick={() => setSection("logs")} />
           <NavItem active={section === "settings"} icon={<Settings size={15} />} label={t("Preferências")} onClick={() => setSection("settings")} />
+          <NavItem active={false} icon={<Power size={15} />} label={t("Sair")} onClick={() => invoke("quit")} />
           <div className="sidebar-card">
             <span className={missingBins ? "dot warn" : "dot ok"} />
             <div>
