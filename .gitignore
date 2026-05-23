@@ -10,7 +10,9 @@ src-tauri/gen/schemas/
 # Artefatos e instaladores locais
 dependencias/*
 !dependencias/
-!dependencias/sites.conf
+Prototipo/
+artefatos/
+mvp.md
 
 # Configuracoes locais de ferramentas
 .claude/
