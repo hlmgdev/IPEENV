@@ -41,7 +41,8 @@
       },
       "nsis": {
         "languages": ["PortugueseBR", "English"],
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerHooks": "nsis-hooks.nsi"
       }
     }
   }
