@@ -640,18 +640,6 @@ function ProjectsView(props: {
           <span>{t("pasta, domínio .test e SSL local")}</span>
         </button>
       </div>
-      <Panel title="VirtualHosts">
-        <div className="vhost-list">
-          {props.projects.map((project) => (
-            <button className="vhost-row" key={project.domain} onClick={() => props.onOpenVhost(project.domain)}>
-              <FileText size={14} />
-              <strong>{project.domain}.conf</strong>
-              <span>{project.vhost_path}</span>
-            </button>
-          ))}
-          {!props.projects.length && <EmptyLine text={t("Nenhum VirtualHost gerado ainda.")} />}
-        </div>
-      </Panel>
     </section>
   );
 }
