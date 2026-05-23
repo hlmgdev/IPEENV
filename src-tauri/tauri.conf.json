@@ -34,6 +34,11 @@
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "windows": {
+      "wix": {
+        "language": "pt-BR"
+      }
+    }
   }
 }
