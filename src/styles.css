@@ -512,11 +512,9 @@ input[type="number"] {
 
 .packages {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 1px;
   background: var(--line);
-  max-height: 440px;
-  overflow: auto;
 }
 .package-group { background: var(--bg-2); padding: 12px; min-width: 0; }
 .package-group h2 {
@@ -525,6 +523,11 @@ input[type="number"] {
   color: var(--accent);
   text-transform: uppercase;
   letter-spacing: .08em;
+}
+.package-group > div {
+  max-height: 250px;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .package-row {
   display: grid;

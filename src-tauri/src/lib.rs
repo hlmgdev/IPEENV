@@ -4009,17 +4009,12 @@ fn is_ephemeral_resource_dir(root: &Path, resource_dir: &Path) -> bool {
 
 fn seed_package_catalog(app: &tauri::AppHandle, root: &Path) -> Result<(), String> {
     let target = package_catalog_path(root);
-    if target.exists() {
-        return Ok(());
-    }
-
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let legacy_local = root.join("config").join("packages.conf");
     if legacy_local.exists() {
-        fs::copy(&legacy_local, &target).map_err(|e| e.to_string())?;
-        return Ok(());
+        let _ = fs::remove_file(&legacy_local); // Limpa o cache antigo
     }
     let source = bundled_or_workspace_file(app, PACKAGE_CATALOG_PATH);
     let source = if source.exists() {
@@ -4082,7 +4077,11 @@ fn parse_package_catalog(raw: &str) -> Vec<PackageEntry> {
         }
         if trimmed.starts_with('#') {
             let label = trimmed.trim_start_matches('#').trim();
-            if !label.is_empty() && !label.starts_with("http") && !label.contains("After download")
+            if !label.is_empty() 
+                && !label.starts_with("http") 
+                && !label.contains("After download")
+                && !label.contains("NTS =") 
+                && !label.contains("Menu >") 
             {
                 category = label.to_string();
             }

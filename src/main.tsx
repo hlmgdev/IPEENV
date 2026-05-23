@@ -789,50 +789,54 @@ function ToolsView(props: {
         <InstallProgressBar progress={props.progress} t={t} />
       )}
 
-      <div className="grid two">
-        <Panel title={t("Utilitários locais")}>
-          <div className="tool-list">
+      <Panel title={t("Catálogo e Utilitários Locais")}>
+        <div className="packages">
+        <section className="package-group">
+          <h2>{t("Utilitários locais")}</h2>
+          <div>
             {props.tools.map((tool) => (
-              <div className="tool-row" key={tool.id}>
+              <div className="package-row" key={tool.id}>
                 <div>
                   <strong>{tool.name}</strong>
-                  <span title={tool.install_path}>
-                    {tool.kind} · {tool.installed ? t("pronto") : tool.available_source ? t("baixável") : t("sem fonte")} · {tool.install_path}
+                  <span title={tool.install_path} style={{ display: 'block', fontSize: '10px' }}>
+                    {tool.installed ? t("pronto") : tool.available_source ? t("baixável") : t("sem fonte")}
                   </span>
                 </div>
-                <div className="tool-actions">
-                  <button onClick={() => props.onLaunchTool(tool.id)} disabled={!tool.installed || !!props.busy}>
-                    {t("Abrir")}
-                  </button>
-                  <button onClick={() => props.onInstallTool(tool.id)} disabled={!tool.available_source || !!props.busy}>
-                    {t("Atualizar")}
-                  </button>
+                <span title={tool.install_path}>{tool.install_path}</span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  {tool.installed && (
+                    <button onClick={() => props.onLaunchTool(tool.id)} disabled={!!props.busy}>
+                      {t("Abrir")}
+                    </button>
+                  )}
+                  {tool.available_source && (
+                    <button onClick={() => props.onInstallTool(tool.id)} disabled={!!props.busy}>
+                      {t("Atualizar")}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
           </div>
-        </Panel>
-      </div>
+        </section>
 
-      <Panel title={t("Catálogo de pacotes ({{count}} pacotes)", { count: props.packages.length })}>
-        <div className="packages">
-          {categories.map((category) => (
-            <section className="package-group" key={category}>
-              <h2>{t(category)}</h2>
-              <div>
-                {grouped[category].map((entry) => (
-                  <article className="package-row" key={`${entry.category}:${entry.name}`}>
-                    <strong>{entry.preferred ? `* ${entry.name}` : entry.name}</strong>
-                    <span title={`${entry.url}\n${entry.install_dir}`}>{entry.installed ? entry.install_dir : entry.url}</span>
-                    <button disabled={entry.installed || !!props.busy} onClick={() => props.onInstallPackage(entry)}>
-                      {entry.installed ? t("Instalado") : props.busy === `package:${entry.name}` ? t("Instalando") : t("Instalar")}
-                    </button>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+        {categories.map((category) => (
+          <section className="package-group" key={category}>
+            <h2>{t(category)}</h2>
+            <div>
+              {grouped[category].map((entry) => (
+                <article className="package-row" key={`${entry.category}:${entry.name}`}>
+                  <strong>{entry.preferred ? `* ${entry.name}` : entry.name}</strong>
+                  <span title={`${entry.url}\n${entry.install_dir}`}>{entry.installed ? entry.install_dir : entry.url}</span>
+                  <button disabled={entry.installed || !!props.busy} onClick={() => props.onInstallPackage(entry)}>
+                    {entry.installed ? t("Instalado") : props.busy === `package:${entry.name}` ? t("Instalando") : t("Instalar")}
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
       </Panel>
     </section>
   );
