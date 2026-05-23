@@ -2415,12 +2415,33 @@ fn ensure_environment(root: &Path) -> Result<(), String> {
     }
     let cfg_path = root.join("config").join("app.json");
     if !cfg_path.exists() {
-        let cfg = AppConfig::default_for(root.to_path_buf());
+        let mut cfg = AppConfig::default_for(root.to_path_buf());
+        cfg.http_port = next_available_port(cfg.http_port);
+        cfg.https_port = next_available_port(cfg.https_port);
+        cfg.mysql_port = next_available_port(cfg.mysql_port);
         fs::write(
             &cfg_path,
             serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
+    } else {
+        let mut cfg = read_config(root)?;
+        let mut changed = false;
+        if !is_port_available(cfg.http_port) {
+            cfg.http_port = next_available_port(cfg.http_port);
+            changed = true;
+        }
+        if !is_port_available(cfg.https_port) {
+            cfg.https_port = next_available_port(cfg.https_port);
+            changed = true;
+        }
+        if !is_port_available(cfg.mysql_port) {
+            cfg.mysql_port = next_available_port(cfg.mysql_port);
+            changed = true;
+        }
+        if changed {
+            write_config(root, &cfg)?;
+        }
     }
     let services_path = root.join("config").join("services.json");
     if !services_path.exists() {
@@ -3063,6 +3084,17 @@ fn is_port_available(port: u16) -> bool {
     // On Windows, bind checks can produce false positives in some edge cases.
     // Confirm by attempting loopback connections on both IPv4 and IPv6.
     !port_accepts_connections(port)
+}
+
+fn next_available_port(starting_from: u16) -> u16 {
+    let mut port = starting_from;
+    while port < 65535 {
+        if is_port_available(port) {
+            return port;
+        }
+        port += 1;
+    }
+    starting_from
 }
 
 fn wait_until_port_busy(port: u16, timeout_ms: u64) -> bool {
