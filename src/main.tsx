@@ -11,6 +11,7 @@ import {
   Folder,
   Globe,
   HardDrive,
+  Moon,
   Plus,
   Power,
   RefreshCw,
@@ -19,6 +20,7 @@ import {
   Settings,
   Shield,
   Square,
+  Sun,
   Terminal,
   Wrench,
 } from "lucide-react";
@@ -155,6 +157,8 @@ function serviceStatusText(status: ServiceInfo["status"], t: Translate) {
 function App() {
   const [locale, setLocale] = useState<Locale>(initialLocale);
   const t = useMemo(() => (key: string, params?: Record<string, string | number>) => translate(locale, key, params), [locale]);
+  const [theme, setTheme] = useState<"dark" | "light">(() => (localStorage.getItem("ipeenv:theme") as "dark" | "light") || "dark");
+  const [accentColor, setAccentColor] = useState<string>(() => localStorage.getItem("ipeenv:accent") || "purple");
   const [section, setSection] = useState<Section>("overview");
   const [env, setEnv] = useState<EnvironmentInfo | null>(null);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -190,6 +194,26 @@ function App() {
   useEffect(() => {
     localStorage.setItem("ipeenv:locale", locale);
   }, [locale]);
+
+  useEffect(() => {
+    localStorage.setItem("ipeenv:theme", theme);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem("ipeenv:accent", accentColor);
+    const colors: Record<string, { base: string, dark: string, soft: string }> = {
+      purple: { base: '#8257e5', dark: '#633bbc', soft: 'rgba(130, 87, 229, 0.16)' },
+      blue: { base: '#3b82f6', dark: '#2563eb', soft: 'rgba(59, 130, 246, 0.16)' },
+      green: { base: '#10b981', dark: '#059669', soft: 'rgba(16, 185, 129, 0.16)' },
+      rose: { base: '#f43f5e', dark: '#e11d48', soft: 'rgba(244, 63, 94, 0.16)' },
+      orange: { base: '#f97316', dark: '#ea580c', soft: 'rgba(249, 115, 22, 0.16)' },
+    };
+    const c = colors[accentColor] || colors.purple;
+    document.documentElement.style.setProperty('--accent', c.base);
+    document.documentElement.style.setProperty('--accent-dark', c.dark);
+    document.documentElement.style.setProperty('--accent-soft', c.soft);
+  }, [accentColor]);
 
   useEffect(() => {
     refresh().catch((error) => setNotice(String(error)));
@@ -408,6 +432,10 @@ function App() {
               locale={locale}
               setLocale={setLocale}
               localeLabels={localeLabels}
+              theme={theme}
+              setTheme={setTheme}
+              accentColor={accentColor}
+              setAccentColor={setAccentColor}
               phpRuntimes={phpRuntimes}
               onOpenHosts={() => runAction("hosts", () => invoke<ActionResult>("open_hosts_file"))}
               onOpenPhpIni={(version) => runAction(`php-ini:${version}`, () => invoke<ActionResult>("open_php_ini", { version }))}
@@ -849,6 +877,10 @@ function SettingsView({
   locale,
   setLocale,
   localeLabels,
+  theme,
+  setTheme,
+  accentColor,
+  setAccentColor,
   phpRuntimes,
   onOpenHosts,
   onOpenPhpIni,
@@ -859,6 +891,10 @@ function SettingsView({
   locale: Locale;
   setLocale: (l: Locale) => void;
   localeLabels: Record<string, string>;
+  theme: "dark" | "light";
+  setTheme: (t: "dark" | "light") => void;
+  accentColor: string;
+  setAccentColor: (c: string) => void;
   phpRuntimes: PhpRuntimeInfo[];
   onOpenHosts: () => void;
   onOpenPhpIni: (version: string) => void;
@@ -909,15 +945,55 @@ function SettingsView({
             <div>
               <dt>{t("Idioma da interface")}</dt>
               <dd>
-                <select
-                  style={{ padding: '6px', borderRadius: '4px', background: 'var(--bg-1)', border: '1px solid var(--line)', color: 'var(--text)' }}
-                  value={locale}
-                  onChange={(e) => setLocale(e.target.value as Locale)}
+                <div style={{ display: 'inline-flex', gap: '4px', background: 'var(--bg-1)', padding: '4px', borderRadius: '6px', border: '1px solid var(--line)' }}>
+                  <button
+                    onClick={() => setLocale('pt-BR')}
+                    style={{ padding: '4px 12px', borderRadius: '4px', background: locale === 'pt-BR' ? 'var(--accent)' : 'transparent', color: locale === 'pt-BR' ? '#fff' : 'inherit' }}
+                  >
+                    PT
+                  </button>
+                  <button
+                    onClick={() => setLocale('en-US')}
+                    style={{ padding: '4px 12px', borderRadius: '4px', background: locale === 'en-US' ? 'var(--accent)' : 'transparent', color: locale === 'en-US' ? '#fff' : 'inherit' }}
+                  >
+                    EN
+                  </button>
+                </div>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("Tema")}</dt>
+              <dd>
+                <button
+                  className="btn"
+                  onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
                 >
-                  {(Object.keys(localeLabels) as Locale[]).map((item) => (
-                    <option key={item} value={item}>{localeLabels[item]}</option>
-                  ))}
-                </select>
+                  {theme === 'dark' ? <Moon size={16} /> : <Sun size={16} />}
+                  {theme === 'dark' ? t("Modo Escuro") : t("Modo Claro")}
+                </button>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("Cor principal")}</dt>
+              <dd style={{ display: 'flex', gap: '8px' }}>
+                {[
+                  { id: 'purple', hex: '#8257e5' },
+                  { id: 'blue', hex: '#3b82f6' },
+                  { id: 'green', hex: '#10b981' },
+                  { id: 'rose', hex: '#f43f5e' },
+                  { id: 'orange', hex: '#f97316' },
+                ].map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => setAccentColor(c.id)}
+                    style={{
+                      width: '24px', height: '24px', borderRadius: '50%', background: c.hex,
+                      border: accentColor === c.id ? '2px solid var(--text)' : '2px solid transparent',
+                      boxShadow: '0 0 0 1px var(--line)'
+                    }}
+                    title={c.id}
+                  />
+                ))}
               </dd>
             </div>
           </dl>

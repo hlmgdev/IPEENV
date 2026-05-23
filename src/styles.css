@@ -16,6 +16,17 @@
   font-family: Inter, "Segoe UI", system-ui, sans-serif;
 }
 
+[data-theme="light"] {
+  --bg-0: #f4f4f5;
+  --bg-1: #ffffff;
+  --bg-2: #fafafa;
+  --bg-3: #e4e4e7;
+  --line: #e4e4e7;
+  --text: #18181b;
+  --muted: #52525b;
+  --faint: #a1a1aa;
+}
+
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg-0); color: var(--text); overflow: hidden; }
 button, input { font: inherit; }
