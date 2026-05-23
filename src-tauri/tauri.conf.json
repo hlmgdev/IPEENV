@@ -37,10 +37,10 @@
     ],
     "windows": {
       "wix": {
-        "language": "pt-BR"
+        "language": ["pt-BR", "en-US"]
       },
       "nsis": {
-        "languages": ["PortugueseBR"],
+        "languages": ["PortugueseBR", "English"],
         "displayLanguageSelector": false
       }
     }
