@@ -828,7 +828,7 @@ function ToolsView(props: {
                 <article className="package-row" key={`${entry.category}:${entry.name}`}>
                   <strong>{entry.name}</strong>
                   <span title={`${entry.url}\n${entry.install_dir}`}>{entry.installed ? entry.install_dir : entry.url}</span>
-                  <button disabled={entry.installed || !!props.busy} onClick={() => props.onInstallPackage(entry)}>
+                  <button data-installed={entry.installed} disabled={entry.installed || !!props.busy} onClick={() => props.onInstallPackage(entry)}>
                     {entry.installed ? t("Instalado") : props.busy === `package:${entry.name}` ? t("Instalando") : t("Instalar")}
                   </button>
                 </article>
