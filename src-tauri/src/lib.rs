@@ -146,6 +146,38 @@ struct HttpsUpdate {
 struct ActionResult {
     ok: bool,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    params: HashMap<String, String>,
+}
+
+impl ActionResult {
+    fn message(ok: bool, message: impl Into<String>) -> Self {
+        Self {
+            ok,
+            message: message.into(),
+            code: None,
+            params: HashMap::new(),
+        }
+    }
+
+    fn coded(
+        ok: bool,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        params: impl IntoIterator<Item = (&'static str, String)>,
+    ) -> Self {
+        Self {
+            ok,
+            message: message.into(),
+            code: Some(code.into()),
+            params: params
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -240,7 +272,7 @@ pub fn run() {
             seed_site_template_catalog(app.handle(), &root)?;
             install_bundled_portable_tools(app.handle(), &root)?;
             cleanup_bundled_resource_dir(app.handle(), &root)?;
-            append_app_log(&root, "Ipeenv inicializado")?;
+            append_app_log(&root, "Ipeenv initialized")?;
             Ok(())
         })
         .manage(ProcessState::default())
@@ -300,13 +332,13 @@ fn warn_missing_legacy_php_runtime_dependency(root: &Path) -> Result<(), String>
     if !has_vc2012 {
         append_app_log(
             root,
-            "Dependencia recomendada ausente: coloque dependencias/vcredist_x64_2012.exe para suportar PHP legado (ex.: 5.6/VC11) sem depender de winget/internet.",
+            "Recommended dependency missing: place dependencias/vcredist_x64_2012.exe to support legacy PHP (for example 5.6/VC11) without relying on winget/internet.",
         )?;
     }
     if !has_vc14plus {
         append_app_log(
             root,
-            "Dependencia recomendada ausente: coloque dependencias/VC_redist.x64.exe para suportar PHP VC14+/VS16/VS17.",
+            "Recommended dependency missing: place dependencias/VC_redist.x64.exe to support PHP VC14+/VS16/VS17.",
         )?;
     }
     Ok(())
@@ -578,13 +610,10 @@ fn create_project(
             notes.push("Apache ainda não está instalado".to_string());
         }
     }
-    append_app_log(&root, &format!("Projeto '{}' criado", name))?;
+    append_app_log(&root, &format!("Project '{}' created", name))?;
     emit_project_progress(&app, &name, "Projeto criado", 100, "done");
 
-    Ok(ActionResult {
-        ok: true,
-        message: notes.join("; "),
-    })
+    Ok(ActionResult::message(true, notes.join("; ")))
 }
 
 #[tauri::command]
@@ -616,41 +645,50 @@ fn start_service_internal(
             .map_err(|e| e.to_string())?
             .contains_key(&spec.id)
     {
-        return Ok(ActionResult {
-            ok: true,
-            message: format!("{} já está em execução.", spec.name),
-        });
+        return Ok(ActionResult::coded(
+            true,
+            "service.alreadyRunning",
+            format!("{} já está em execução.", spec.name),
+            [("service", spec.name.to_string())],
+        ));
     }
     if !spec.executable.exists() {
         append_app_log(
             &root,
-            &format!("{} não iniciado: binário ausente", spec.name),
+            &format!("{} not started: missing binary", spec.name),
         )?;
-        return Ok(ActionResult {
-            ok: false,
-            message: format!(
+        return Ok(ActionResult::coded(
+            false,
+            "service.missingBinary",
+            format!(
                 "{} não encontrado em {}.",
                 spec.name,
                 display_path(&spec.executable)
             ),
-        });
+            [
+                ("service", spec.name.to_string()),
+                ("path", display_path(&spec.executable)),
+            ],
+        ));
     }
     if let Some(port) = spec.port {
         if !is_port_available(port) {
             append_app_log(
                 &root,
                 &format!(
-                    "{} não iniciou: porta {} ocupada antes do start.",
+                    "{} did not start: port {} was already in use.",
                     spec.name, port
                 ),
             )?;
-            return Ok(ActionResult {
-                ok: false,
-                message: format!(
+            return Ok(ActionResult::coded(
+                false,
+                "service.portOccupied",
+                format!(
                     "Porta {} ocupada. Pare o processo externo ou altere a configuracao.",
                     port
                 ),
-            });
+                [("port", port.to_string())],
+            ));
         }
     }
     if service == "apache" && cfg.https_enabled {
@@ -658,23 +696,25 @@ fn start_service_internal(
             append_app_log(
                 &root,
                 &format!(
-                    "Apache não iniciou: porta HTTPS {} ocupada antes do start.",
+                    "Apache did not start: HTTPS port {} was already in use.",
                     cfg.https_port
                 ),
             )?;
-            return Ok(ActionResult {
-                ok: false,
-                message: format!(
+            return Ok(ActionResult::coded(
+                false,
+                "service.httpsPortOccupied",
+                format!(
                     "Porta HTTPS {} ocupada. Outro processo está usando esta porta.",
                     cfg.https_port
                 ),
-            });
+                [("port", cfg.https_port.to_string())],
+            ));
         }
         if cfg.https_port < 1024 {
             append_app_log(
                 &root,
                 &format!(
-                    "Aviso: porta HTTPS {} requer privilegios de administrador no Windows.",
+                    "Warning: HTTPS port {} requires administrator privileges on Windows.",
                     cfg.https_port
                 ),
             )?;
@@ -701,7 +741,7 @@ fn start_service_internal(
         start_project_php_cgi(&root, &state)?;
         if let Some(message) = test_apache_config(&spec, &cfg.root_dir)? {
             append_app_log(&root, &message)?;
-            return Ok(ActionResult { ok: false, message });
+            return Ok(ActionResult::message(false, message));
         }
     }
 
@@ -720,12 +760,14 @@ fn start_service_internal(
                 if wait_until_port_busy(port, 8000) {
                     append_app_log(
                         &root,
-                        "Apache iniciou em modo externo (pai terminou, porta ativa).",
+                        "Apache started in external mode (parent process exited, port is active).",
                     )?;
-                    return Ok(ActionResult {
-                        ok: true,
-                        message: "Apache iniciado.".to_string(),
-                    });
+                    return Ok(ActionResult::coded(
+                        true,
+                        "service.started",
+                        "Apache iniciado.",
+                        [("service", "Apache".to_string())],
+                    ));
                 }
             }
         }
@@ -746,40 +788,46 @@ fn start_service_internal(
             let mut children = state.children.lock().map_err(|e| e.to_string())?;
             stop_project_php_cgi(&mut children);
         }
-        return Ok(ActionResult { ok: false, message });
+        return Ok(ActionResult::message(false, message));
     }
     if service == "apache" {
         if let Some(port) = spec.port {
             if wait_until_port_busy(port, 8000) {
-                append_app_log(&root, &format!("{} iniciado", spec.name))?;
-                return Ok(ActionResult {
-                    ok: true,
-                    message: format!("{} iniciado.", spec.name),
-                });
+                append_app_log(&root, &format!("{} started", spec.name))?;
+                return Ok(ActionResult::coded(
+                    true,
+                    "service.started",
+                    format!("{} iniciado.", spec.name),
+                    [("service", spec.name.to_string())],
+                ));
             }
         }
         append_app_log(
             &root,
-            "Apache não confirmou escuta da porta após start (timeout de 8s).",
+            "Apache did not confirm port listening after start (8s timeout).",
         )?;
         let mut children = state.children.lock().map_err(|e| e.to_string())?;
         stop_project_php_cgi(&mut children);
-        return Ok(ActionResult {
-            ok: false,
-            message: "Apache não confirmou escuta da porta após start.".to_string(),
-        });
+        return Ok(ActionResult::coded(
+            false,
+            "service.startTimeout",
+            "Apache não confirmou escuta da porta após start.",
+            [("service", "Apache".to_string())],
+        ));
     }
-    append_app_log(&root, &format!("{} iniciado", spec.name))?;
+    append_app_log(&root, &format!("{} started", spec.name))?;
     state
         .children
         .lock()
         .map_err(|e| e.to_string())?
         .insert(spec.id, child);
 
-    Ok(ActionResult {
-        ok: true,
-        message: format!("{} iniciado.", spec.name),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "service.started",
+        format!("{} iniciado.", spec.name),
+        [("service", spec.name.to_string())],
+    ))
 }
 
 fn ensure_mysql_data_initialized(root: &Path, spec: &ServiceSpec) -> Result<(), String> {
@@ -795,7 +843,7 @@ fn ensure_mysql_data_initialized(root: &Path, spec: &ServiceSpec) -> Result<(), 
     if has_partial {
         append_app_log(
             root,
-            "MySQL datadir parcial detectado; recriando estrutura inicial.",
+            "Partial MySQL data directory detected; recreating initial structure.",
         )?;
         for entry in fs::read_dir(&data_dir).map_err(|e| e.to_string())? {
             let path = entry.map_err(|e| e.to_string())?.path();
@@ -824,7 +872,7 @@ fn ensure_mysql_data_initialized(root: &Path, spec: &ServiceSpec) -> Result<(), 
     init.creation_flags(CREATE_NO_WINDOW);
     let output = init.output().map_err(|e| e.to_string())?;
     if output.status.success() && marker.exists() {
-        append_app_log(root, "MySQL datadir inicializado automaticamente.")?;
+        append_app_log(root, "MySQL data directory initialized automatically.")?;
         return Ok(());
     }
 
@@ -835,11 +883,11 @@ fn ensure_mysql_data_initialized(root: &Path, spec: &ServiceSpec) -> Result<(), 
     } else if !stdout.is_empty() {
         stdout
     } else {
-        "falha sem detalhes".to_string()
+        "failure without details".to_string()
     };
     append_app_log(
         root,
-        &format!("Falha ao inicializar datadir do MySQL: {}", detail),
+        &format!("Failed to initialize MySQL data directory: {}", detail),
     )?;
     Err(format!("MySQL não pode inicializar datadir: {}", detail))
 }
@@ -869,18 +917,22 @@ fn stop_service_internal(
                 .output();
         }
         stop_project_php_cgi(&mut children);
-        append_app_log(&root, "apache parado")?;
-        return Ok(ActionResult {
-            ok: true,
-            message: "apache parado.".to_string(),
-        });
+        append_app_log(&root, "apache stopped")?;
+        return Ok(ActionResult::coded(
+            true,
+            "service.stopped",
+            "apache parado.",
+            [("service", "apache".to_string())],
+        ));
     }
     let child_opt = children.remove(service);
     let Some(mut child) = child_opt else {
-        return Ok(ActionResult {
-            ok: true,
-            message: "Servico ja estava parado.".to_string(),
-        });
+        return Ok(ActionResult::coded(
+            true,
+            "service.alreadyStopped",
+            "Servico ja estava parado.",
+            [("service", service.to_string())],
+        ));
     };
 
     let _ = child.kill();
@@ -888,11 +940,13 @@ fn stop_service_internal(
     if service == "apache" {
         stop_project_php_cgi(&mut children);
     }
-    append_app_log(&root, &format!("{} parado", service))?;
-    Ok(ActionResult {
-        ok: true,
-        message: format!("{} parado.", service),
-    })
+    append_app_log(&root, &format!("{} stopped", service))?;
+    Ok(ActionResult::coded(
+        true,
+        "service.stopped",
+        format!("{} parado.", service),
+        [("service", service.to_string())],
+    ))
 }
 
 fn start_project_php_cgi(root: &Path, state: &State<ProcessState>) -> Result<(), String> {
@@ -921,14 +975,14 @@ fn start_project_php_cgi(root: &Path, state: &State<ProcessState>) -> Result<(),
         let Some(php_dir) = php_runtime_dir_for_version(root, &version) else {
             append_app_log(
                 root,
-                &format!("PHP {} não encontrado para php-cgi", version),
+                &format!("PHP {} not found for php-cgi", version),
             )?;
             continue;
         };
         if let Err(err) = validate_php_runtime(&php_dir) {
             append_app_log(
                 root,
-                &format!("PHP {} invalido para php-cgi: {}", version, err),
+                &format!("PHP {} is invalid for php-cgi: {}", version, err),
             )?;
             continue;
         }
@@ -936,7 +990,7 @@ fn start_project_php_cgi(root: &Path, state: &State<ProcessState>) -> Result<(),
         if !php_cgi.exists() {
             append_app_log(
                 root,
-                &format!("php-cgi.exe ausente em {}", display_path(&php_dir)),
+                &format!("php-cgi.exe missing at {}", display_path(&php_dir)),
             )?;
             continue;
         }
@@ -947,7 +1001,7 @@ fn start_project_php_cgi(root: &Path, state: &State<ProcessState>) -> Result<(),
             append_app_log(
                 root,
                 &format!(
-                    "php-cgi {} ja usa ou encontrou porta ocupada {}",
+                    "php-cgi {} already uses or found occupied port {}",
                     version, port
                 ),
             )?;
@@ -974,7 +1028,7 @@ fn start_project_php_cgi(root: &Path, state: &State<ProcessState>) -> Result<(),
             .insert(key, child);
         append_app_log(
             root,
-            &format!("php-cgi {} iniciado em 127.0.0.1:{}", version, port),
+            &format!("php-cgi {} started at 127.0.0.1:{}", version, port),
         )?;
     }
 
@@ -1081,10 +1135,16 @@ fn update_ports(app: tauri::AppHandle, ports: PortUpdate) -> Result<ActionResult
     write_config(&root, &cfg)?;
     ensure_mysql_config(&root)?;
     let _ = generate_apache_config(app);
-    Ok(ActionResult {
-        ok: true,
-        message: "Portas atualizadas. Reinicie os servicos para aplicar.".to_string(),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "ports.updated",
+        "Portas atualizadas. Reinicie os servicos para aplicar.",
+        [
+            ("http", ports.http_port.to_string()),
+            ("https", ports.https_port.to_string()),
+            ("mysql", ports.mysql_port.to_string()),
+        ],
+    ))
 }
 
 #[tauri::command]
@@ -1103,14 +1163,17 @@ fn update_https(app: tauri::AppHandle, request: HttpsUpdate) -> Result<ActionRes
     }
 
     let _ = generate_apache_config(app);
-    Ok(ActionResult {
-        ok: true,
-        message: if request.enabled {
+    let message = if request.enabled {
             "HTTPS local habilitado. O mkcert instalou a CA local e os certificados foram preparados. Reinicie o Apache.".to_string()
         } else {
             "HTTPS local desabilitado. Reinicie o Apache para aplicar.".to_string()
-        },
-    })
+        };
+    Ok(ActionResult::coded(
+        true,
+        if request.enabled { "https.enabled" } else { "https.disabled" },
+        message,
+        [],
+    ))
 }
 
 #[tauri::command]
@@ -1155,10 +1218,12 @@ fn open_path(path: String) -> Result<ActionResult, String> {
         .status()
         .map_err(|e| e.to_string())?;
 
-    Ok(ActionResult {
-        ok: status.success(),
-        message: format!("Pasta aberta: {}.", display_path(&target)),
-    })
+    Ok(ActionResult::coded(
+        status.success(),
+        "path.opened",
+        format!("Pasta aberta: {}.", display_path(&target)),
+        [("path", display_path(&target))],
+    ))
 }
 
 #[tauri::command]
@@ -1195,10 +1260,12 @@ fn open_url(url: String) -> Result<ActionResult, String> {
         .status()
         .map_err(|e| e.to_string())?;
 
-    Ok(ActionResult {
-        ok: status.success(),
-        message: "URL solicitada ao navegador padrão.".to_string(),
-    })
+    Ok(ActionResult::coded(
+        status.success(),
+        "url.opened",
+        "URL solicitada ao navegador padrão.",
+        [("url", url)],
+    ))
 }
 
 #[tauri::command]
@@ -1221,27 +1288,34 @@ fn open_project(
         let host_result = add_host(app.clone(), domain.clone())?;
         notes.push(host_result.message);
         if !read_hosts_file().unwrap_or_default().contains(&domain) {
-            return Ok(ActionResult {
-                ok: false,
-                message: format!(
+            return Ok(ActionResult::coded(
+                false,
+                "hosts.permissionRequired",
+                format!(
                     "Confirme a permissão para adicionar {} ao hosts e tente abrir novamente.",
                     domain
                 ),
-            });
+                [("domain", domain)],
+            ));
         }
     }
 
     let apache_spec =
         service_spec(&cfg, "apache").ok_or_else(|| "Servico Apache desconhecido.".to_string())?;
     if !apache_spec.executable.exists() {
-        return Ok(ActionResult {
-            ok: false,
-            message: format!(
+        return Ok(ActionResult::coded(
+            false,
+            "apache.missingForProject",
+            format!(
                 "Apache não encontrado em {}. Instale o Apache pelo catálogo de pacotes antes de abrir {}.",
                 display_path(&apache_spec.executable),
                 domain
             ),
-        });
+            [
+                ("path", display_path(&apache_spec.executable)),
+                ("domain", domain),
+            ],
+        ));
     }
 
     let apache_running = service_is_running(&state, "apache", apache_spec.port)?;
@@ -1251,10 +1325,12 @@ fn open_project(
     } else {
         let started = start_service(app.clone(), state.clone(), "apache".to_string())?;
         if !started.ok {
-            return Ok(ActionResult {
-                ok: false,
-                message: format!("Não foi possível iniciar o Apache: {}", started.message),
-            });
+            return Ok(ActionResult::coded(
+                false,
+                "apache.startFailed",
+                format!("Não foi possível iniciar o Apache: {}", started.message),
+                [("message", started.message)],
+            ));
         }
         notes.push(started.message);
     }
@@ -1267,10 +1343,7 @@ fn open_project(
     let opened = open_url(url.clone())?;
     notes.push(format!("Abrindo {}.", url));
 
-    Ok(ActionResult {
-        ok: opened.ok,
-        message: notes.join(" "),
-    })
+    Ok(ActionResult::message(opened.ok, notes.join(" ")))
 }
 
 #[tauri::command]
@@ -1291,10 +1364,12 @@ fn open_vhost_file(app: tauri::AppHandle, domain: String) -> Result<ActionResult
         ));
     }
     open_text_file(&root, &path)?;
-    Ok(ActionResult {
-        ok: true,
-        message: format!("VirtualHost aberto: {}.", display_path(&path)),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "vhost.opened",
+        format!("VirtualHost aberto: {}.", display_path(&path)),
+        [("path", display_path(&path))],
+    ))
 }
 
 #[tauri::command]
@@ -1359,14 +1434,19 @@ fn install_package_internal(
         if let Some(app) = app {
             emit_install_progress(app, name, "package", "Pacote ja instalado", 100, "done");
         }
-        return Ok(ActionResult {
-            ok: true,
-            message: format!(
+        return Ok(ActionResult::coded(
+            true,
+            "package.alreadyInstalled",
+            format!(
                 "{} já está instalado em {}.",
                 name,
                 display_path(&target_dir)
             ),
-        });
+            [
+                ("package", name.to_string()),
+                ("path", display_path(&target_dir)),
+            ],
+        ));
     }
     if let Some(app) = app {
         emit_install_progress(
@@ -1436,14 +1516,19 @@ fn install_package_internal(
     }
     flatten_single_directory(&target_dir)?;
 
-    append_app_log(&root, &format!("Pacote instalado pelo catálogo: {}", name))?;
+    append_app_log(&root, &format!("Package installed from catalog: {}", name))?;
     if let Some(app) = app {
         emit_install_progress(app, name, "package", "Instalação concluída", 100, "done");
     }
-    Ok(ActionResult {
-        ok: true,
-        message: format!("{} instalado em {}.", name, display_path(&target_dir)),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "package.installed",
+        format!("{} instalado em {}.", name, display_path(&target_dir)),
+        [
+            ("package", name.to_string()),
+            ("path", display_path(&target_dir)),
+        ],
+    ))
 }
 
 #[tauri::command]
@@ -1550,19 +1635,20 @@ fn set_php_extension(
     append_app_log(
         &root,
         &format!(
-            "PHP {} extensão {} {}",
+            "PHP {} extension {} {}",
             version,
             name,
             if enabled {
-                "habilitada"
+                "enabled"
             } else {
-                "desabilitada"
+                "disabled"
             }
         ),
     )?;
-    Ok(ActionResult {
-        ok: true,
-        message: format!(
+    Ok(ActionResult::coded(
+        true,
+        if enabled { "php.extensionEnabled" } else { "php.extensionDisabled" },
+        format!(
             "Extensão {} {} no PHP {}. Reinicie o Apache para aplicar.",
             name,
             if enabled {
@@ -1572,7 +1658,11 @@ fn set_php_extension(
             },
             version
         ),
-    })
+        [
+            ("extension", name.to_string()),
+            ("version", version),
+        ],
+    ))
 }
 
 #[tauri::command]
@@ -1584,10 +1674,12 @@ fn open_php_ini(app: tauri::AppHandle, version: String) -> Result<ActionResult, 
     ensure_php_ini_for_runtime(&root, &version, &php_dir)?;
     let ini = php_ini_path(&root, &version);
     open_text_file(&root, &ini)?;
-    Ok(ActionResult {
-        ok: true,
-        message: format!("php.ini do PHP {} aberto no editor.", version),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "php.iniOpened",
+        format!("php.ini do PHP {} aberto no editor.", version),
+        [("version", version)],
+    ))
 }
 
 #[tauri::command]
@@ -1604,10 +1696,12 @@ fn open_packages_config(app: tauri::AppHandle) -> Result<ActionResult, String> {
     }
 
     open_text_file(&root, &packages)?;
-    Ok(ActionResult {
-        ok: true,
-        message: "Catálogo de pacotes aberto no editor.".to_string(),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "catalog.packagesOpened",
+        "Catálogo de pacotes aberto no editor.",
+        [("path", display_path(&packages))],
+    ))
 }
 
 #[tauri::command]
@@ -1616,10 +1710,12 @@ fn open_hosts_file(app: tauri::AppHandle) -> Result<ActionResult, String> {
     let hosts = windows_hosts_path();
 
     open_text_file(&root, &hosts)?;
-    Ok(ActionResult {
-        ok: true,
-        message: "Hosts aberto no editor.".to_string(),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "hosts.opened",
+        "Hosts aberto no editor.",
+        [("path", display_path(&hosts))],
+    ))
 }
 
 #[tauri::command]
@@ -1630,10 +1726,12 @@ fn open_sites_config(app: tauri::AppHandle) -> Result<ActionResult, String> {
     let sites = site_template_catalog_path(&root);
 
     open_text_file(&root, &sites)?;
-    Ok(ActionResult {
-        ok: true,
-        message: "Catálogo de modelos aberto no editor.".to_string(),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "catalog.templatesOpened",
+        "Catálogo de modelos aberto no editor.",
+        [("path", display_path(&sites))],
+    ))
 }
 
 fn open_text_file(root: &Path, path: &Path) -> Result<(), String> {
@@ -1784,16 +1882,21 @@ fn install_local_tool(app: tauri::AppHandle, tool: String) -> Result<ActionResul
         return Err(err);
     }
 
-    append_app_log(&root, &format!("Ferramenta instalada: {}", spec.name))?;
+    append_app_log(&root, &format!("Tool installed: {}", spec.name))?;
     emit_install_progress(&app, spec.name, "tool", "Ferramenta pronta", 100, "done");
-    Ok(ActionResult {
-        ok: true,
-        message: format!(
+    Ok(ActionResult::coded(
+        true,
+        "tool.installed",
+        format!(
             "{} instalado em {}.",
             spec.name,
             display_path(&spec.install_path)
         ),
-    })
+        [
+            ("tool", spec.name.to_string()),
+            ("path", display_path(&spec.install_path)),
+        ],
+    ))
 }
 
 #[tauri::command]
@@ -1815,10 +1918,12 @@ fn launch_tool(app: tauri::AppHandle, tool: String) -> Result<ActionResult, Stri
         .current_dir(&spec.install_path)
         .spawn()
         .map_err(|e| e.to_string())?;
-    Ok(ActionResult {
-        ok: true,
-        message: format!("{} aberto.", spec.name),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "tool.opened",
+        format!("{} aberto.", spec.name),
+        [("tool", spec.name.to_string())],
+    ))
 }
 
 #[tauri::command]
@@ -1830,10 +1935,12 @@ fn add_host(app: tauri::AppHandle, domain: String) -> Result<ActionResult, Strin
     let current = read_hosts_file().unwrap_or_default();
 
     if current.lines().any(|line| line.contains(&domain)) {
-        return Ok(ActionResult {
-            ok: true,
-            message: format!("{} ja existe no hosts.", domain),
-        });
+        return Ok(ActionResult::coded(
+            true,
+            "hosts.alreadyExists",
+            format!("{} ja existe no hosts.", domain),
+            [("domain", domain)],
+        ));
     }
 
     let mut file = fs::OpenOptions::new().append(true).open(&hosts_path);
@@ -1841,22 +1948,26 @@ fn add_host(app: tauri::AppHandle, domain: String) -> Result<ActionResult, Strin
     match file.as_mut() {
         Ok(file) => {
             writeln!(file, "\n# Ipeenv\n{}", line).map_err(|e| e.to_string())?;
-            append_app_log(&root, &format!("Host adicionado: {}", domain))?;
-            Ok(ActionResult {
-                ok: true,
-                message: format!("{} adicionado ao hosts.", domain),
-            })
+            append_app_log(&root, &format!("Host added: {}", domain))?;
+            Ok(ActionResult::coded(
+                true,
+                "hosts.added",
+                format!("{} adicionado ao hosts.", domain),
+                [("domain", domain)],
+            ))
         }
         Err(err) if is_permission_error(err) => {
             run_elevated_hosts_update(&root, &domain, true)?;
             append_app_log(
                 &root,
-                &format!("Solicitada elevação para adicionar host: {}", domain),
+                &format!("Elevation requested to add host: {}", domain),
             )?;
-            Ok(ActionResult {
-                ok: true,
-                message: format!("Permissão elevada solicitada para adicionar {} ao hosts. Confirme o UAC e recarregue o navegador.", domain),
-            })
+            Ok(ActionResult::coded(
+                true,
+                "hosts.addElevationRequested",
+                format!("Permissão elevada solicitada para adicionar {} ao hosts. Confirme o UAC e recarregue o navegador.", domain),
+                [("domain", domain)],
+            ))
         }
         Err(err) => Err(format!(
             "Não foi possível editar {}: {}",
@@ -1879,25 +1990,29 @@ fn remove_host(app: tauri::AppHandle, domain: String) -> Result<ActionResult, St
         .join("\n");
     match fs::write(&hosts_path, filtered) {
         Ok(()) => {
-            append_app_log(&root, &format!("Host removido: {}", domain))?;
-            Ok(ActionResult {
-                ok: true,
-                message: format!("{} removido do hosts.", domain),
-            })
+            append_app_log(&root, &format!("Host removed: {}", domain))?;
+            Ok(ActionResult::coded(
+                true,
+                "hosts.removed",
+                format!("{} removido do hosts.", domain),
+                [("domain", domain)],
+            ))
         }
         Err(err) if is_permission_error(&err) => {
             run_elevated_hosts_update(&root, &domain, false)?;
             append_app_log(
                 &root,
-                &format!("Solicitada elevação para remover host: {}", domain),
+                &format!("Elevation requested to remove host: {}", domain),
             )?;
-            Ok(ActionResult {
-                ok: true,
-                message: format!(
+            Ok(ActionResult::coded(
+                true,
+                "hosts.removeElevationRequested",
+                format!(
                     "Permissão elevada solicitada para remover {} do hosts. Confirme o UAC.",
                     domain
                 ),
-            })
+                [("domain", domain)],
+            ))
         }
         Err(err) => Err(format!("Não foi possível editar hosts: {}", err)),
     }
@@ -1909,11 +2024,13 @@ fn enable_ssl(app: tauri::AppHandle, domain: String) -> Result<ActionResult, Str
     ensure_environment(&root)?;
     let domain = normalize_domain(&domain)?;
     ensure_domain_certificate(&root, &domain)?;
-    append_app_log(&root, &format!("SSL preparado para {}", domain))?;
-    Ok(ActionResult {
-        ok: true,
-        message: format!("SSL local preparado para {}.", domain),
-    })
+    append_app_log(&root, &format!("SSL prepared for {}", domain))?;
+    Ok(ActionResult::coded(
+        true,
+        "ssl.prepared",
+        format!("SSL local preparado para {}.", domain),
+        [("domain", domain)],
+    ))
 }
 
 #[tauri::command]
@@ -2010,10 +2127,12 @@ fn generate_apache_config(app: tauri::AppHandle) -> Result<ActionResult, String>
             .map_err(|e| e.to_string())?;
     }
 
-    Ok(ActionResult {
-        ok: true,
-        message: "Configuracao do Apache regenerada.".to_string(),
-    })
+    Ok(ActionResult::coded(
+        true,
+        "apache.configGenerated",
+        "Configuracao do Apache regenerada.",
+        [],
+    ))
 }
 
 struct ServiceSpec {
@@ -3126,7 +3245,7 @@ fn run_site_command(
             .to_ascii_lowercase()
             .starts_with("composer ")
     {
-        append_app_log(root, "Composer bloqueou dependencias por advisory. Reexecutando com --no-security-blocking para template legado.")?;
+        append_app_log(root, "Composer blocked dependencies because of security advisories. Retrying with --no-security-blocking for a legacy template.")?;
         emit_project_progress(
             app,
             name,
@@ -3367,7 +3486,7 @@ fn ensure_php_runtime_dependencies(
         );
         append_app_log(
             root,
-            "Runtime VC11 detectado sem MSVCR110.dll. Instalando Visual C++ 2012 Runtime...",
+            "Runtime VC11 detected without MSVCR110.dll. Installing Visual C++ 2012 Runtime...",
         )?;
         install_vc2012_runtime(root)?;
         if !has_vc110_runtime() {
@@ -3395,7 +3514,7 @@ fn ensure_php_runtime_dependencies(
             82,
             "running",
         );
-        append_app_log(root, "Runtime VC14+/VS detectado sem vcruntime140. Instalando Visual C++ 2015-2022 Runtime...")?;
+        append_app_log(root, "Runtime VC14+/VS detected without vcruntime140. Installing Visual C++ 2015-2022 Runtime...")?;
         install_vc14plus_runtime(root)?;
         if !has_vc14plus_runtime() {
             return Err(
@@ -3431,7 +3550,7 @@ fn ensure_php_runtime_dependencies(
         );
         append_app_log(
             root,
-            "Detectada dependencia MSVCR110.dll. Tentando instalar Visual C++ 2012 Runtime...",
+            "MSVCR110.dll dependency detected. Trying to install Visual C++ 2012 Runtime...",
         )?;
         install_vc2012_runtime(root)?;
         let recheck = validate_php_runtime(php_dir);
@@ -3770,8 +3889,8 @@ fn cleanup_bundled_resource_dir(app: &tauri::AppHandle, root: &Path) -> Result<(
     }
 
     match fs::remove_dir_all(&resource_dir) {
-        Ok(()) => append_app_log(root, "_up_ removido após espelhar recursos locais"),
-        Err(err) => append_app_log(root, &format!("Não foi possível remover _up_: {}", err)),
+        Ok(()) => append_app_log(root, "_up_ removed after mirroring local resources"),
+        Err(err) => append_app_log(root, &format!("Could not remove _up_: {}", err)),
     }
 }
 
@@ -4132,8 +4251,8 @@ fn install_bundled_portable_tools(app: &tauri::AppHandle, root: &Path) -> Result
         };
 
         match result {
-            Ok(()) => append_app_log(root, &format!("Ferramenta preparada em bin: {}", spec.name))?,
-            Err(err) => append_app_log(root, &format!("Falha ao preparar {}: {}", spec.name, err))?,
+            Ok(()) => append_app_log(root, &format!("Tool prepared in bin: {}", spec.name))?,
+            Err(err) => append_app_log(root, &format!("Failed to prepare {}: {}", spec.name, err))?,
         }
     }
     Ok(())
@@ -4463,7 +4582,7 @@ fn allow_firewall(app: tauri::AppHandle) -> Result<ActionResult, String> {
         match add_firewall_rule(name, exe) {
             Ok(()) => {
                 created.push(name.clone());
-                append_app_log(&root, &format!("Firewall: regra criada para {}", name))?;
+                append_app_log(&root, &format!("Firewall: rule created for {}", name))?;
             }
             Err(err) => errors.push(format!("{}: {}", name, err)),
         }
@@ -4471,11 +4590,13 @@ fn allow_firewall(app: tauri::AppHandle) -> Result<ActionResult, String> {
 
     if !errors.is_empty() {
         request_elevated_firewall_rules(&root, &candidates)?;
-        append_app_log(&root, "Solicitada elevação para regras de firewall")?;
-        return Ok(ActionResult {
-            ok: true,
-            message: "Permissão elevada solicitada para liberar Apache, MySQL e PHP-CGI no Firewall. Confirme o UAC.".to_string(),
-        });
+        append_app_log(&root, "Elevation requested for firewall rules")?;
+        return Ok(ActionResult::coded(
+            true,
+            "firewall.elevationRequested",
+            "Permissão elevada solicitada para liberar Apache, MySQL e PHP-CGI no Firewall. Confirme o UAC.",
+            [],
+        ));
     }
 
     let mut parts: Vec<String> = Vec::new();
@@ -4492,14 +4613,14 @@ fn allow_firewall(app: tauri::AppHandle) -> Result<ActionResult, String> {
         parts.push(format!("Erros: {}", errors.join("; ")));
     }
 
-    Ok(ActionResult {
-        ok: errors.is_empty(),
-        message: if parts.is_empty() {
+    Ok(ActionResult::message(
+        errors.is_empty(),
+        if parts.is_empty() {
             "Nenhum executavel encontrado para liberar.".to_string()
         } else {
             parts.join(" | ")
         },
-    })
+    ))
 }
 
 fn firewall_candidates(root: &Path) -> Vec<(String, PathBuf)> {
@@ -4673,12 +4794,12 @@ fn request_elevated_firewall_rules(
         append_app_log(
             root,
             &format!(
-                "Firewall elevado: {}",
+                "Elevated firewall: {}",
                 fs::read_to_string(&result).unwrap_or_default().trim()
             ),
         )?;
     } else {
-        append_app_log(root, "Firewall elevado solicitado, mas nenhum resultado foi gravado. A permissão pode ter sido cancelada ou o script falhou.")?;
+        append_app_log(root, "Elevated firewall requested, but no result was written. Permission may have been canceled or the script failed.")?;
     }
 
     Ok(())

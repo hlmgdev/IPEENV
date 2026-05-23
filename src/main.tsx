@@ -66,6 +66,8 @@ type EnvironmentInfo = {
 type ActionResult = {
   ok: boolean;
   message: string;
+  code?: string;
+  params?: Record<string, string>;
 };
 
 type PackageEntry = {
@@ -226,13 +228,15 @@ function App() {
 
   const runningCount = env?.services.filter((service) => service.status === "running").length ?? 0;
   const missingBins = env?.services.filter((service) => !service.available).length ?? 0;
+  const actionMessage = (result: ActionResult) =>
+    result.code ? t(`action.${result.code}`, result.params) : t(result.message);
 
   const runAction = async (label: string, action: () => Promise<ActionResult>) => {
     setBusy(label);
     try {
       const result = await action();
-      setNotice(result.message);
       await refresh();
+      setNotice(actionMessage(result));
     } catch (error) {
       setNotice(String(error));
     } finally {
@@ -333,9 +337,9 @@ function App() {
               projects={filteredProjects}
               onCreate={() => setModalOpen(true)}
               onOpenWww={() => runAction("www", () => invoke<ActionResult>("open_www_folder"))}
-              onOpenUrl={(url) => invoke<ActionResult>("open_url", { url }).then((r) => setNotice(r.message))}
+              onOpenUrl={(url) => invoke<ActionResult>("open_url", { url }).then((r) => setNotice(actionMessage(r)))}
               onOpenProject={(domain) => runAction(`open-project:${domain}`, () => invoke<ActionResult>("open_project", { domain }))}
-              onOpenPath={(path) => invoke<ActionResult>("open_path", { path }).then((r) => setNotice(r.message))}
+              onOpenPath={(path) => invoke<ActionResult>("open_path", { path }).then((r) => setNotice(actionMessage(r)))}
               onOpenVhost={(domain) => runAction(`vhost:${domain}`, () => invoke<ActionResult>("open_vhost_file", { domain }))}
               onOpenVhostsFolder={() => runAction("vhosts", () => invoke<ActionResult>("open_vhosts_folder"))}
               onSsl={(domain) => runAction(`ssl:${domain}`, () => invoke<ActionResult>("enable_ssl", { domain }))}
@@ -731,7 +735,7 @@ function ToolsView(props: {
       </div>
 
       {props.progress && (
-        <InstallProgressBar progress={props.progress} />
+        <InstallProgressBar progress={props.progress} t={t} />
       )}
 
       <div className="grid two">
@@ -783,12 +787,12 @@ function ToolsView(props: {
   );
 }
 
-function InstallProgressBar({ progress }: { progress: InstallProgress }) {
+function InstallProgressBar({ progress, t }: { progress: InstallProgress; t: Translate }) {
   return (
     <div className={`project-progress install-progress ${progress.status}`}>
       <div>
         <strong>{progress.item}</strong>
-        <span>{progress.step} · {progress.percent}%</span>
+        <span>{t(progress.step)} · {progress.percent}%</span>
       </div>
       <div className="progress-track">
         <span style={{ width: `${progress.percent}%` }} />
@@ -1094,7 +1098,7 @@ function CreateProjectModal(props: {
         {props.progress && (
           <div className={`project-progress ${props.progress.status}`}>
             <div>
-              <strong>{props.progress.step}</strong>
+              <strong>{t(props.progress.step)}</strong>
               <span>{props.progress.project} · {props.progress.percent}%</span>
             </div>
             <div className="progress-track">
