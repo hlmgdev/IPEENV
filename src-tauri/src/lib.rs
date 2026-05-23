@@ -2886,8 +2886,8 @@ fn ensure_domain_certificate(root: &Path, domain: &str) -> Result<(), String> {
 
     install_mkcert_ca(root)?;
     let mkcert = mkcert_path(root)?;
-    let output = Command::new(&mkcert)
-        .args([
+    let mut command = Command::new(&mkcert);
+    command.args([
             "-cert-file",
             &cert.to_string_lossy(),
             "-key-file",
@@ -2896,9 +2896,10 @@ fn ensure_domain_certificate(root: &Path, domain: &str) -> Result<(), String> {
         ])
         .env("CAROOT", mkcert_ca_root(root))
         .env("TRUST_STORES", "system")
-        .current_dir(&cert_dir)
-        .output()
-        .map_err(|e| e.to_string())?;
+        .current_dir(&cert_dir);
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let output = command.output().map_err(|e| e.to_string())?;
 
     if output.status.success() {
         Ok(())
@@ -2923,12 +2924,13 @@ fn certificate_is_placeholder(cert: &Path) -> bool {
 fn install_mkcert_ca(root: &Path) -> Result<(), String> {
     let mkcert = mkcert_path(root)?;
     fs::create_dir_all(mkcert_ca_root(root)).map_err(|e| e.to_string())?;
-    let output = Command::new(&mkcert)
-        .arg("-install")
+    let mut command = Command::new(&mkcert);
+    command.arg("-install")
         .env("CAROOT", mkcert_ca_root(root))
-        .env("TRUST_STORES", "system")
-        .output()
-        .map_err(|e| e.to_string())?;
+        .env("TRUST_STORES", "system");
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000);
+    let output = command.output().map_err(|e| e.to_string())?;
 
     if output.status.success() {
         Ok(())
