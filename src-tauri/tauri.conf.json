@@ -38,6 +38,10 @@
     "windows": {
       "wix": {
         "language": "pt-BR"
+      },
+      "nsis": {
+        "languages": ["PortugueseBR"],
+        "displayLanguageSelector": false
       }
     }
   }
