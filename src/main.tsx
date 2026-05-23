@@ -282,7 +282,6 @@ function App() {
             <span> v{env?.app_version ?? "0.1.0"} · {env?.root_dir ?? t("Preparando ambiente")}</span>
           </div>
         </div>
-        <div className="window-dots"><span /><span /><span /></div>
       </header>
 
       <div className="toolbar">
@@ -305,21 +304,6 @@ function App() {
         <button onClick={() => runAction("config", () => invoke<ActionResult>("generate_apache_config"))}>
           <RefreshCw size={14} /> {t("Gerar configurações")}
         </button>
-
-        <select
-          className="language-select"
-          aria-label={t("Idioma")}
-          value={locale}
-          onChange={(event) => setLocale(event.target.value as Locale)}
-        >
-          {(Object.keys(localeLabels) as Locale[]).map((item) => (
-            <option key={item} value={item}>{localeLabels[item]}</option>
-          ))}
-        </select>
-        <div className="search">
-          <Search size={14} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Buscar projeto")} />
-        </div>
       </div>
 
       <div className="layout">
@@ -421,6 +405,9 @@ function App() {
             <SettingsView
               t={t}
               env={env}
+              locale={locale}
+              setLocale={setLocale}
+              localeLabels={localeLabels}
               phpRuntimes={phpRuntimes}
               onOpenHosts={() => runAction("hosts", () => invoke<ActionResult>("open_hosts_file"))}
               onOpenPhpIni={(version) => runAction(`php-ini:${version}`, () => invoke<ActionResult>("open_php_ini", { version }))}
@@ -859,6 +846,9 @@ function LogsView(props: { t: Translate; active: string; setActive: (kind: strin
 function SettingsView({
   t,
   env,
+  locale,
+  setLocale,
+  localeLabels,
   phpRuntimes,
   onOpenHosts,
   onOpenPhpIni,
@@ -866,6 +856,9 @@ function SettingsView({
 }: {
   t: Translate;
   env: EnvironmentInfo | null;
+  locale: Locale;
+  setLocale: (l: Locale) => void;
+  localeLabels: Record<string, string>;
   phpRuntimes: PhpRuntimeInfo[];
   onOpenHosts: () => void;
   onOpenPhpIni: (version: string) => void;
@@ -907,9 +900,29 @@ function SettingsView({
   return (
     <section className="view">
       <div className="view-head">
-        <div><h1>{t("Preferências")}</h1><p>{t("Configurações e caminhos do ambiente.")}</p></div>
-        <button className="btn" onClick={onOpenHosts}><FileText size={14} /> {t("Abrir hosts")}</button>
+        <div><h1>{t("Preferências")}</h1><p>{t("Configurações do ambiente.")}</p></div>
+        <button onClick={onOpenHosts} className="btn"><FileText size={14} /> {t("Abrir hosts")}</button>
       </div>
+      <Panel title={t("Geral")}>
+        <div>
+          <dl>
+            <div>
+              <dt>{t("Idioma da interface")}</dt>
+              <dd>
+                <select
+                  style={{ padding: '6px', borderRadius: '4px', background: 'var(--bg-1)', border: '1px solid var(--line)', color: 'var(--text)' }}
+                  value={locale}
+                  onChange={(e) => setLocale(e.target.value as Locale)}
+                >
+                  {(Object.keys(localeLabels) as Locale[]).map((item) => (
+                    <option key={item} value={item}>{localeLabels[item]}</option>
+                  ))}
+                </select>
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </Panel>
       <Panel title={t("PHP por versão")}>
         <div className="php-manager">
           <aside className="php-runtime-list">
@@ -960,16 +973,6 @@ function SettingsView({
               <EmptyLine text={t("Instale uma versão de PHP pelo catálogo de pacotes para gerenciar extensões.")} />
             )}
           </div>
-        </div>
-      </Panel>
-      <Panel title={t("Estrutura isolada")}>
-        <div className="settings-grid">
-          <Setting icon={<HardDrive size={16} />} label={t("Root do ambiente")} value={env?.root_dir ?? "-"} />
-          <Setting icon={<Server size={16} />} label="Apache" value="bin/apache/bin/httpd.exe" />
-          <Setting icon={<FileText size={16} />} label="PHP" value="bin/php/php.exe" />
-          <Setting icon={<Database size={16} />} label="MySQL" value="bin/mysql/bin/mysqld.exe" />
-          <Setting icon={<Shield size={16} />} label="SSL" value="etc/ssl/certs" />
-          <Setting icon={<Globe size={16} />} label={t("Projetos")} value="www" />
         </div>
       </Panel>
     </section>
