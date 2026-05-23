@@ -2424,24 +2424,6 @@ fn ensure_environment(root: &Path) -> Result<(), String> {
             serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-    } else {
-        let mut cfg = read_config(root)?;
-        let mut changed = false;
-        if !is_port_available(cfg.http_port) {
-            cfg.http_port = next_available_port(cfg.http_port);
-            changed = true;
-        }
-        if !is_port_available(cfg.https_port) {
-            cfg.https_port = next_available_port(cfg.https_port);
-            changed = true;
-        }
-        if !is_port_available(cfg.mysql_port) {
-            cfg.mysql_port = next_available_port(cfg.mysql_port);
-            changed = true;
-        }
-        if changed {
-            write_config(root, &cfg)?;
-        }
     }
     let services_path = root.join("config").join("services.json");
     if !services_path.exists() {
