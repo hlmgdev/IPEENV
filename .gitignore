@@ -1,0 +1,30 @@
+# Dependencias instaladas
+node_modules/
+
+# Saidas de build
+dist/
+release/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Artefatos e instaladores locais
+dependencias/*
+!dependencias/
+!dependencias/sites.conf
+
+# Configuracoes locais de ferramentas
+.claude/
+
+# Arquivos temporarios e logs
+*.log
+*.tmp
+tmp/
+logs/
+httpd-test.conf
+nul
+
+# Sistema operacional e editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
