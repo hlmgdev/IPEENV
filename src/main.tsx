@@ -820,13 +820,13 @@ function ToolsView(props: {
           </div>
         </section>
 
-        {categories.map((category) => (
+        {categories.filter(c => c !== "Ferramentas locais").map((category) => (
           <section className="package-group" key={category}>
             <h2>{t(category)}</h2>
             <div>
               {grouped[category].map((entry) => (
                 <article className="package-row" key={`${entry.category}:${entry.name}`}>
-                  <strong>{entry.preferred ? `* ${entry.name}` : entry.name}</strong>
+                  <strong>{entry.name}</strong>
                   <span title={`${entry.url}\n${entry.install_dir}`}>{entry.installed ? entry.install_dir : entry.url}</span>
                   <button disabled={entry.installed || !!props.busy} onClick={() => props.onInstallPackage(entry)}>
                     {entry.installed ? t("Instalado") : props.busy === `package:${entry.name}` ? t("Instalando") : t("Instalar")}
